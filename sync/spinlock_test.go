@@ -85,8 +85,9 @@ func (mm *RWMutexMap) Get(i int) (b bool) {
 const N = 1e3
 
 var (
-	sm = SpinMap{m: map[int]bool{}}
-	mm = MutexMap{m: map[int]bool{}}
+	sm   = SpinMap{m: map[int]bool{}}
+	mm   = MutexMap{m: map[int]bool{}}
+	rwmm = RWMutexMap{m: map[int]bool{}}
 )
 
 func BenchmarkSpinL(b *testing.B) {
@@ -123,6 +124,26 @@ func BenchmarkMutex(b *testing.B) {
 			go func(i int) {
 				mm.Get(i - 1)
 				mm.Get(i + 1)
+				wg.Done()
+			}(i)
+		}
+	}
+	wg.Wait()
+}
+
+func BenchmarkRWMutex(b *testing.B) {
+	var wg sync.WaitGroup
+	for i := 0; i < b.N; i++ {
+		wg.Add(N * 2)
+		for i := 0; i < N; i++ {
+			go func(i int) {
+				rwmm.Add(i)
+				wg.Done()
+			}(i)
+			go mm.Get(i)
+			go func(i int) {
+				rwmm.Get(i - 1)
+				rwmm.Get(i + 1)
 				wg.Done()
 			}(i)
 		}
