@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+func TestTryLock(t *testing.T) {
+	var sl SpinLock
+	if !sl.TryLock() {
+		t.Error("TryLock failed.")
+	}
+}
+
+func TestLock(t *testing.T) {
+	var sl SpinLock
+	sl.Lock()
+
+	if sl.TryLock() {
+		t.Error("TryLock() returned true when it shouldn't have, w t f mate?")
+	}
+
+	sl.Unlock()
+
+	if !sl.TryLock() {
+		t.Error("TryLock() returned false when it shouldn't have.")
+	}
+
+}
+
 type SpinMap struct {
 	SpinLock
 	m map[int]bool
@@ -62,9 +85,8 @@ func (mm *RWMutexMap) Get(i int) (b bool) {
 const N = 1e3
 
 var (
-	sm  = SpinMap{m: map[int]bool{}}
-	mm  = MutexMap{m: map[int]bool{}}
-	rmm = RWMutexMap{m: map[int]bool{}}
+	sm = SpinMap{m: map[int]bool{}}
+	mm = MutexMap{m: map[int]bool{}}
 )
 
 func BenchmarkSpinL(b *testing.B) {
