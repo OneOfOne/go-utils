@@ -1,4 +1,4 @@
-package spinlock
+package sync
 
 import (
 	"sync"
