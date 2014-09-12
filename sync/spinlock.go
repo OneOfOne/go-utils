@@ -1,15 +1,18 @@
 package sync
 
-import "runtime"
+import (
+	"runtime"
+	"sync/atomic"
+)
 
 // SpinLock implements a simple atomic spin lock, the zero value for a SpinLock is an unlocked spinlock.
 type SpinLock struct {
-	v AtomicFlag
+	f uint32
 }
 
 // Lock locks sl. If the lock is already in use, the caller blocks until Unlock is called
 func (sl *SpinLock) Lock() {
-	for !sl.v.Set() {
+	for !sl.TryLock() {
 		runtime.Gosched() //allow other goroutines to do stuff.
 	}
 }
@@ -17,16 +20,16 @@ func (sl *SpinLock) Lock() {
 // Unlock unlocks sl, unlike [Mutex.Unlock](http://golang.org/pkg/sync/#Mutex.Unlock),
 // there's no harm calling it on an unlocked SpinLock
 func (sl *SpinLock) Unlock() {
-	sl.v.Clear()
+	atomic.StoreUint32(&sl.f, 0)
 }
 
 // TryLock will try to lock sl and return whether it succeed or not without blocking.
 func (sl *SpinLock) TryLock() bool {
-	return sl.v.Set()
+	return atomic.CompareAndSwapUint32(&sl.f, 0, 1)
 }
 
 func (sl *SpinLock) String() string {
-	if sl.v.IsSet() {
+	if atomic.LoadUint32(&sl.f) == 1 {
 		return "Locked"
 	}
 	return "Unlocked"
