@@ -29,7 +29,7 @@ func sizeofInternal(val reflect.Value, fromStruct bool, depth int) (sz uint64) {
 	}
 
 	switch val.Kind() {
-	case reflect.Ptr:
+	case reflect.Ptr, reflect.Interface:
 		if val.IsNil() {
 			break
 		}
