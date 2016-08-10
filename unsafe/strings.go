@@ -10,9 +10,7 @@ import (
 // ByteSlice returns s as a byte slice without copying,
 // any attempt to modifythe resulting slice might end all life as we know.
 func ByteSlice(s *string) []byte {
-	sh := (*reflect.SliceHeader)(unsafe.Pointer(s))
-	sh.Cap = sh.Len
-	return *(*[]byte)(unsafe.Pointer(sh))
+	return VoidToBytes(unsafe.Pointer(s), len(*s))
 }
 
 // VoidToBytes is a helper function to convert a void* buffer from a cgo call
