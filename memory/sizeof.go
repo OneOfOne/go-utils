@@ -17,9 +17,14 @@ func isNativeType(k reflect.Kind) bool {
 	return false
 }
 
-func sizeofInternal(val reflect.Value, fromStruct bool, depth int) (sz uint64) {
-	if depth++; depth > 1000 {
-		panic("sizeOf recursed more than 1000 times.")
+func sizeofInternal(val reflect.Value, fromStruct bool, depth int, refmap map[uintptr]bool) (sz uint64) {
+
+	if !val.IsValid() {
+		return 0
+	}
+
+	if val.CanAddr() {
+		refmap[val.Addr().Pointer()] = true
 	}
 
 	typ := val.Type()
@@ -29,15 +34,21 @@ func sizeofInternal(val reflect.Value, fromStruct bool, depth int) (sz uint64) {
 	}
 
 	switch val.Kind() {
-	case reflect.Ptr, reflect.Interface:
+	case reflect.Ptr:
 		if val.IsNil() {
 			break
 		}
-		sz += sizeofInternal(val.Elem(), false, depth)
+		if refmap[val.Pointer()] {
+			break
+		}
+
+		fallthrough
+	case reflect.Interface:
+		sz += sizeofInternal(val.Elem(), false, depth, refmap)
 
 	case reflect.Struct:
 		for i := 0; i < val.NumField(); i++ {
-			sz += sizeofInternal(val.Field(i), true, depth)
+			sz += sizeofInternal(val.Field(i), true, depth, refmap)
 		}
 
 	case reflect.Array:
@@ -46,7 +57,7 @@ func sizeofInternal(val reflect.Value, fromStruct bool, depth int) (sz uint64) {
 		}
 		sz = 0
 		for i := 0; i < val.Len(); i++ {
-			sz += sizeofInternal(val.Index(i), false, depth)
+			sz += sizeofInternal(val.Index(i), false, depth, refmap)
 		}
 	case reflect.Slice:
 		if !fromStruct {
@@ -58,7 +69,7 @@ func sizeofInternal(val reflect.Value, fromStruct bool, depth int) (sz uint64) {
 			break
 		}
 		for i := 0; i < val.Len(); i++ {
-			sz += sizeofInternal(val.Index(i), false, depth)
+			sz += sizeofInternal(val.Index(i), false, depth, refmap)
 		}
 	case reflect.Map:
 		if val.IsNil() {
@@ -71,7 +82,7 @@ func sizeofInternal(val reflect.Value, fromStruct bool, depth int) (sz uint64) {
 		}
 		keys := val.MapKeys()
 		for i := 0; i < len(keys); i++ {
-			sz += sizeofInternal(keys[i], false, depth) + sizeofInternal(val.MapIndex(keys[i]), false, depth)
+			sz += sizeofInternal(keys[i], false, depth, refmap) + sizeofInternal(val.MapIndex(keys[i]), false, depth, refmap)
 		}
 	case reflect.String:
 		if !fromStruct {
@@ -85,8 +96,9 @@ func sizeofInternal(val reflect.Value, fromStruct bool, depth int) (sz uint64) {
 // Sizeof returns the estimated memory usage of object(s) not just the size of the type.
 // On 64bit Sizeof("test") == 12 (8 = sizeof(StringHeader) + 4 bytes).
 func Sizeof(objs ...interface{}) (sz uint64) {
+	refmap := make(map[uintptr]bool)
 	for i := range objs {
-		sz += sizeofInternal(reflect.ValueOf(objs[i]), false, 0)
+		sz += sizeofInternal(reflect.ValueOf(objs[i]), false, 0, refmap)
 	}
 	return
 }
