@@ -5,6 +5,11 @@ import (
 	"testing"
 )
 
+var (
+	sliceSize  = uint64(reflect.TypeOf(reflect.SliceHeader{}).Size())
+	stringSize = uint64(reflect.TypeOf(reflect.StringHeader{}).Size())
+)
+
 type S struct {
 	a  int
 	s  string
@@ -53,10 +58,24 @@ func TestSizeOf(t *testing.T) {
 	}
 
 	if sz := Sizeof([]S{S{}}); sz != esz+24 {
-		t.Fatalf(`Sizeof([...]S{S{}}) != Sizeof(S{}), expected %d, got %d`, esz, sz)
+		t.Fatalf(`Sizeof([]S{S{}}) != Sizeof(S{}), expected %d, got %d`, esz+24, sz)
 	}
 
 	if sz := Sizeof("test"); sz != stringSize+4 {
 		t.Fatalf(`Sizeof("test") != stringSize + 4, expected %d, got %d`, stringSize+4, sz)
+	}
+
+	var sp *S
+	for i := 0; i < 10000; i++ {
+		sp = &S{p: sp}
+	}
+	if sz := Sizeof(*sp); sz != esz*10000 {
+		t.Fatalf(`Sizeof(*sp) != Sizeof(S{}) * 10000, expected %d, got %d`, esz*10000, sz)
+	}
+}
+
+func BenchmarkSizeof(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		Sizeof(S{})
 	}
 }

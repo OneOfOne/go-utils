@@ -1,11 +1,15 @@
 package memory
 
-import "reflect"
-
-var (
-	sliceSize  = uint64(reflect.TypeOf(reflect.SliceHeader{}).Size())
-	stringSize = uint64(reflect.TypeOf(reflect.StringHeader{}).Size())
+import (
+	"reflect"
+	"sync"
 )
+
+var processingPool = sync.Pool{
+	New: func() interface{} {
+		return []reflect.Value{}
+	},
+}
 
 func isNativeType(k reflect.Kind) bool {
 	switch k {
@@ -17,88 +21,84 @@ func isNativeType(k reflect.Kind) bool {
 	return false
 }
 
-func sizeofInternal(val reflect.Value, fromStruct bool, depth int, refmap map[uintptr]bool) (sz uint64) {
-
-	if !val.IsValid() {
-		return 0
-	}
-
-	if val.CanAddr() {
-		refmap[val.Addr().Pointer()] = true
-	}
-
-	typ := val.Type()
-
-	if !fromStruct {
-		sz = uint64(typ.Size())
-	}
-
-	switch val.Kind() {
-	case reflect.Ptr:
-		if val.IsNil() {
-			break
-		}
-		if refmap[val.Pointer()] {
-			break
-		}
-
-		fallthrough
-	case reflect.Interface:
-		sz += sizeofInternal(val.Elem(), false, depth, refmap)
-
-	case reflect.Struct:
-		for i := 0; i < val.NumField(); i++ {
-			sz += sizeofInternal(val.Field(i), true, depth, refmap)
-		}
-
-	case reflect.Array:
-		if isNativeType(typ.Elem().Kind()) {
-			break
-		}
-		sz = 0
-		for i := 0; i < val.Len(); i++ {
-			sz += sizeofInternal(val.Index(i), false, depth, refmap)
-		}
-	case reflect.Slice:
-		if !fromStruct {
-			sz = sliceSize
-		}
-		el := typ.Elem()
-		if isNativeType(el.Kind()) {
-			sz += uint64(val.Len()) * uint64(el.Size())
-			break
-		}
-		for i := 0; i < val.Len(); i++ {
-			sz += sizeofInternal(val.Index(i), false, depth, refmap)
-		}
-	case reflect.Map:
-		if val.IsNil() {
-			break
-		}
-		kel, vel := typ.Key(), typ.Elem()
-		if isNativeType(kel.Kind()) && isNativeType(vel.Kind()) {
-			sz += uint64(kel.Size()+vel.Size()) * uint64(val.Len())
-			break
-		}
-		keys := val.MapKeys()
-		for i := 0; i < len(keys); i++ {
-			sz += sizeofInternal(keys[i], false, depth, refmap) + sizeofInternal(val.MapIndex(keys[i]), false, depth, refmap)
-		}
-	case reflect.String:
-		if !fromStruct {
-			sz = stringSize
-		}
-		sz += uint64(val.Len())
-	}
-	return
-}
-
 // Sizeof returns the estimated memory usage of object(s) not just the size of the type.
 // On 64bit Sizeof("test") == 12 (8 = sizeof(StringHeader) + 4 bytes).
 func Sizeof(objs ...interface{}) (sz uint64) {
 	refmap := make(map[uintptr]bool)
+	processing := processingPool.Get().([]reflect.Value)[:0]
 	for i := range objs {
-		sz += sizeofInternal(reflect.ValueOf(objs[i]), false, 0, refmap)
+		processing = append(processing, reflect.ValueOf(objs[i]))
 	}
+
+	for len(processing) > 0 {
+		var val reflect.Value
+		val, processing = processing[len(processing)-1], processing[:len(processing)-1]
+		if !val.IsValid() {
+			continue
+		}
+
+		if val.CanAddr() {
+			refmap[val.Addr().Pointer()] = true
+		}
+
+		typ := val.Type()
+
+		sz += uint64(typ.Size())
+
+		switch val.Kind() {
+		case reflect.Ptr:
+			if val.IsNil() {
+				break
+			}
+			if refmap[val.Pointer()] {
+				break
+			}
+
+			fallthrough
+		case reflect.Interface:
+			processing = append(processing, val.Elem())
+
+		case reflect.Struct:
+			sz -= uint64(typ.Size())
+			for i := 0; i < val.NumField(); i++ {
+				processing = append(processing, val.Field(i))
+			}
+
+		case reflect.Array:
+			if isNativeType(typ.Elem().Kind()) {
+				break
+			}
+			sz -= uint64(typ.Size())
+			for i := 0; i < val.Len(); i++ {
+				processing = append(processing, val.Index(i))
+			}
+		case reflect.Slice:
+			el := typ.Elem()
+			if isNativeType(el.Kind()) {
+				sz += uint64(val.Len()) * uint64(el.Size())
+				break
+			}
+			for i := 0; i < val.Len(); i++ {
+				processing = append(processing, val.Index(i))
+			}
+		case reflect.Map:
+			if val.IsNil() {
+				break
+			}
+			kel, vel := typ.Key(), typ.Elem()
+			if isNativeType(kel.Kind()) && isNativeType(vel.Kind()) {
+				sz += uint64(kel.Size()+vel.Size()) * uint64(val.Len())
+				break
+			}
+			keys := val.MapKeys()
+			for i := 0; i < len(keys); i++ {
+				processing = append(processing, keys[i])
+				processing = append(processing, val.MapIndex(keys[i]))
+			}
+		case reflect.String:
+			sz += uint64(val.Len())
+		}
+	}
+	processingPool.Put(processing)
 	return
 }
